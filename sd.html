@@ -17,9 +17,23 @@ canvas {
     height: 95vh;
 	aspect-ratio: 1 / 1;
 }
+#scanlines-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(to right, transparent, transparent 0px, rgba(0, 0, 0, 0.33) 2px, transparent 4px);
+    background-size: 100% 4px;
+    opacity: 1;
+    display:none;
+    z-index: 10;
+}
 </style>
 </head>
 <body>
+<div id="scanlines-overlay"></div>
 
 <canvas id="game" width="600" height="600"></canvas>
 
@@ -46,6 +60,8 @@ const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange
 				 white : '#fff', gray : '#999', red : '#f00', green : '#0f0', debug : '#f0f' };
 
 let isPaused = false;//una pausa ogni tanto ci vuole!
+let scanLinesEnabled = false;//a noi piacciono i monitor vintage
+let colorMode = 0;//0=colori, 1=bw, 2=verde, 3=arancio
 
 //audio
 let isMute = false;
@@ -122,7 +138,25 @@ document.addEventListener('keydown', e => {
 	if(e.key === 'R' || e.key === 'r') resetGame();
 	if(e.key === 'M' || e.key === 'm') isMute = !isMute;
 	if(e.key === 'P' || e.key === 'p') isPaused = !isPaused;
+	if(e.key === 'X' || e.key === 'x') changeScanLines();
+	if(e.key === 'C' || e.key === 'c') {
+		colorMode = (colorMode + 1) % 4;
+		if (colorMode === 0) ctx.filter = 'none';
+		else if (colorMode === 1) ctx.filter = 'grayscale(1)';
+		else if (colorMode === 2) ctx.filter = 'sepia(1) hue-rotate(60deg) saturate(10)';
+		else ctx.filter = 'sepia(1) saturate(10)';
+	}
 });
+
+//gestione scanlines on/off
+function changeScanLines() {
+  scanLinesEnabled = !scanLinesEnabled;
+  if (scanLinesEnabled) {
+    document.getElementById('scanlines-overlay').style.display = 'block';
+  } else {
+    document.getElementById('scanlines-overlay').style.display = 'none';
+  }
+}
 
 //init ascensori
 for(let c of columns){
@@ -495,10 +529,12 @@ function drawStats() {
     ctx.fillText('FLOOR= ' + player.floor, 0, 10);
 	ctx.fillText('PLAYER= ' + player.x +' '+player.y, 0, 20);
 	ctx.fillText('LIVES= ' + player.lives, 0, 30);
-	ctx.fillText('ISMUTE= ' + isMute, 0, 40);
-	ctx.fillText('ISPAUSED= ' + isPaused, 0, 50);
+	ctx.fillText('IS[M]UTE= ' + isMute, 0, 50);
+	ctx.fillText('IS[P]AUSED= ' + isPaused, 0, 60);
+	ctx.fillText('[X]CANLINES= ' + scanLinesEnabled, 0, 70);
+	ctx.fillText('[C]OLORMODE= ' + colorMode, 0, 80);
 	for(let i=0;i<elevators.length;i++) {
-		ctx.fillText('E['+elevators[i].id+']= ' + (elevators[i].x|0) +' '+(elevators[i].y|0)+' -> '+elevators[i].speed.toFixed(1), 0, 70 +(i*10));
+		ctx.fillText('E['+elevators[i].id+']= ' + (elevators[i].x|0) +' '+(elevators[i].y|0)+' -> '+elevators[i].speed.toFixed(1), 0, 100 +(i*10));
 	}
 }
 
