@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="shortcut icon" type="image/x-icon" href="favicon.ico"/>
+<title>Spy's Demise - Apple ][ clone</title>
+<style>
+body {
+	background:#000;
+}
+canvas {
+    display: block;
+    margin: auto;
+    image-rendering: pixelated;
+    width: 95vw;
+    height: 95vh;
+	aspect-ratio: 1 / 1;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game" width="600" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const FLOORS = 10;
+const FLOOR_HEIGHT = canvas.height / FLOORS;
+
+const PLAYER_SPEED = 2.5;
+const PLAYER_SIZE = 30;
+
+const ELEVATOR_SIZE = 50;
+const ELEVATORS = 7;
+const ELEVATOR_MIN_SPEED = 1.5;//velocita riposo
+const ELEVATOR_MAX_SPEED = 4.5;//velocita imbruttita
+
+const elevatorsColumnWidth = (canvas.width - 2 * PLAYER_SIZE) / ELEVATORS;
+
+const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  elevatorGuard : '#000', 
+				 explosion1 : '#f00', explosion2 : '#ff0', explosion3 : '#f80',
+				 floor1 : '#333', floor2 : '#666', floor3 : '#999',
+				 white : '#fff', gray : '#999', red : '#f00', green : '#0f0', debug : '#f0f' };
+
+let isPaused = false;//una pausa ogni tanto ci vuole!
+
+//audio
+let isMute = false;
+const elevatorSoundTop = new Audio('./res/elevator-top.wav');
+const elevatorSoundBottom = new Audio('./res/elevator-bottom.wav');
+const elevatorSoundHit = new Audio('./res/elevator-hit.wav');
+const elevatorSoundBonus = new Audio('./res/elevator-bonus.wav');
+
+//apple 2 beep scopiazzato da artillery che suona da dio!
+function playBeep() {
+  if(isMute) return;
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const oscillator = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  oscillator.type = 'square'; // Apple II usava un'onda quadra
+  oscillator.frequency.setValueAtTime(935, audioCtx.currentTime);
+  gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+
+  oscillator.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  oscillator.start();
+  oscillator.stop(audioCtx.currentTime + 0.1); // durata 250 ms
+}
+
+
+function playElevatorSoundTop() { if(isMute) return; const sound = elevatorSoundTop.cloneNode(); sound.play(); }
+function playElevatorSoundBottom() { if(isMute) return; const sound = elevatorSoundBottom.cloneNode(); sound.play(); }
+function playElevatorSoundHit() { if(isMute) return; const sound = elevatorSoundHit.cloneNode(); sound.play(); }
+function playElevatorSoundBonus() { if(isMute) return; const sound = elevatorSoundBonus.cloneNode(); sound.play(); }
+
+// ===== PLAYER =====
+const player = {
+    x: PLAYER_SIZE / 2,
+	y: 0,//calcolato a caldo
+    floor: 0,
+    w: PLAYER_SIZE,
+    h: PLAYER_SIZE,
+	dir: 0,//fermo
+	isMovingFloor: false,//no cambio piano
+	isExploding: false,//no kaboom
+	explosionX:0,
+	explosionY:0,
+	targetY: 0,//stesso target
+	floorSpeed: 2,//velocita di salita
+	lives: 5//vite
+};
+
+function rnd(min, max) {
+	return Math.random()* (max - min) + min;
+}
+
+
+// ===== ASCENSORI =====
+const elevators = [];
+const columns = [];
+const floors = [];
+
+//calcola y di ogni piano e uscita
+for (let i=0;i<FLOORS;i++) {
+	floors.push( { id: i, exit: i % 2 === 0 ? 'right' : 'left', y: canvas.height - 4 - i*FLOOR_HEIGHT } );        
+}
+
+//calcola x di ogni colonna
+for (let i=0;i<ELEVATORS;i++) {
+	columns.push( {id: i, x: PLAYER_SIZE + (elevatorsColumnWidth/2) + (elevatorsColumnWidth * i) });
+}
+
+//tasti
+document.addEventListener('keydown', e => {
+	if(e.key === 'ArrowLeft') player.dir = -1;
+	if(e.key === 'ArrowRight') player.dir = 1;
+	if(e.key === 'R' || e.key === 'r') resetGame();
+	if(e.key === 'M' || e.key === 'm') isMute = !isMute;
+	if(e.key === 'P' || e.key === 'p') isPaused = !isPaused;
+});
+
+//init ascensori
+for(let c of columns){
+	elevators.push({
+		id: c.id,
+		x: c.x,
+		y: rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2),
+		w: ELEVATOR_SIZE,
+		h: ELEVATOR_SIZE,
+		dir: rnd(0,1) > 0.5 ? 1 : -1,
+		speed:2
+	});
+}
+
+function resetGame() {
+	player.x = player.w / 2;
+	player.y = 0;
+    player.floor = 0;
+	player.dir = 0;
+	player.isMovingFloor = false; // flag per animazione floor
+	player.targetY = 0;           // Y del piano successivo
+	player.floorSpeed = 2;        // velocità salita
+	player.lives = 5;
+	
+	for(let e of elevators) {
+		e.y = rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2);
+		e.dir = rnd(0,1) > 0.5 ? 1 : -1;
+		e.speed = 2;
+	}
+	
+	playBeep();
+}
+
+// ===== COLLISION =====
+function checkCollision(player, elevator){
+    return Math.abs(player.x - elevator.x) < (player.w + elevator.w)/2 &&
+           Math.abs(player.y - elevator.y) < (player.h + elevator.h)/2;
+}
+
+// ===== UPDATE =====
+function update(){
+	if (player.isExploding) return;
+	if (isPaused) return;
+	
+	const currentFloor = floors[player.floor];
+	const exitSide = currentFloor.exit;
+	
+	if(player.isMovingFloor){
+		// muove il player verso targetY
+		if(player.y > player.targetY){
+			player.y -= player.floorSpeed;
+			if(player.y <= player.targetY){
+				player.y = player.targetY;
+				player.isMovingFloor = false;
+				player.floor++;
+			}
+		} else if(player.y < player.targetY){
+			player.y += player.floorSpeed;
+			if(player.y >= player.targetY){
+				player.y = player.targetY;
+				player.isMovingFloor = false;
+				player.floor++;
+			}
+		}
+	} else {
+		// movimento orizzontale normale
+		if(player.dir !== 0) player.x += player.dir * PLAYER_SPEED;
+	}
+	
+
+    // uscita lato sinistro
+	if (player.x < (player.w / 2)) {
+		player.x = player.w / 2; //resta a sx
+		player.dir = 0;
+
+		if (exitSide === 'left') {
+			//player.floor++;
+			if (player.floor + 1 < FLOORS) {
+				player.isMovingFloor = true;
+				player.targetY = floors[player.floor+1].y - (player.h / 2);	
+				playElevatorSoundBonus();
+			} else {
+				alert('YOU WIN!');
+				resetGame();
+			}
+		}
+	}
+
+	// uscita lato destro
+	if (player.x  > (canvas.width - player.w / 2)) {
+		player.x = canvas.width - player.w / 2; //resta a dx
+		player.dir = 0;
+		
+		if (exitSide === 'right') {
+			//player.floor++;
+			if (player.floor + 1 < FLOORS) {
+				player.isMovingFloor = true;
+				player.targetY = floors[player.floor+1].y - (player.h / 2);
+				playElevatorSoundBonus();
+			} else {
+				alert('YOU WIN!');
+				resetGame();
+			}
+		}
+	}
+
+
+    // Calcolo Y player basato sul piano
+    let playerY = floors[player.floor].y - (player.h / 2);
+	if(!player.isMovingFloor) player.y = playerY;
+
+	// --- Movimento ascensori ---
+	for(let e of elevators){
+		//gli ascensori sono bastardi!
+		//calcola velocità basata su distanza dal player
+		const dx = player.x - e.x;
+		const dy = player.y - e.y;
+		const dist = Math.sqrt(dx * dx + dy * dy);
+
+		const range = player.w * 20;
+		e.speed = ELEVATOR_MIN_SPEED + (1 - Math.min(dist, range)/range) * (ELEVATOR_MAX_SPEED - ELEVATOR_MIN_SPEED);
+	
+        e.y += e.dir * e.speed;
+
+        if (e.y - e.h/2 <= 0) {
+			e.dir *= -1;
+			e.y = e.h/2;
+			playElevatorSoundTop();
+		}
+		if (e.y + e.h/2 >= canvas.height){
+            e.dir *= -1;
+			e.y = canvas.height - e.h/2;
+			playElevatorSoundBottom();
+        }
+
+        if (checkCollision(player, e) && !player.isExploding){
+			playElevatorSoundHit();
+			
+			player.lives--;
+			player.dir = 0;
+			player.isExploding = true;
+			player.explosionX = player.x;
+			player.explosionY = player.y;
+			setTimeout(function() { 
+				player.isExploding = false; 
+				if(player.lives === 0) {
+					alert('GAME OVER!');
+					resetGame();
+				}
+			}, 3000);
+			
+			if (exitSide === 'left') player.x = canvas.width - player.w / 2;//dx
+			else player.x = player.x = player.w / 2;//sx
+        }
+		
+    }
+}
+
+// ===== DRAW =====
+function draw(){
+	//tutto noir
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+	
+	//bordo
+	ctx.strokeStyle = COLORS.gray;
+	ctx.strokeRect(0, 0, canvas.width, canvas.height);
+	
+    //piani
+    for(let f of floors) {
+		drawFloor(f);
+    }
+	
+	//colonne/funi ascensori
+	for(let c of columns) {
+		drawColumn(c);
+	}
+
+    //ascensori
+    for(let e of elevators) {
+		drawElevator(e);
+    }
+
+    drawPlayer();
+	drawStats();
+}
+
+//kaboom
+function drawExplosion() {
+    for (let j = 1; j <= 3; j++) {
+		ctx.beginPath();
+		const noise = PLAYER_SIZE * 0.25;
+		for (let i = 0; i <= 20; i++) {
+			const angle = (i / 20) * Math.PI * 2;
+			const offset = Math.sin(i * 1.7) * noise;
+			const r = PLAYER_SIZE * 1.5 + offset - (j * 8);
+			const x = player.explosionX + Math.cos(angle) * r;
+			const y = player.explosionY + Math.sin(angle) * r;
+
+			if (i === 0) ctx.moveTo(x, y);
+			else ctx.lineTo(x, y);
+		}
+		ctx.closePath();
+		ctx.fillStyle = j === 1 ? COLORS.explosion1 : j === 2 ? COLORS.explosion2 : COLORS.explosion3;
+		ctx.fill();
+	}
+
+    ctx.strokeStyle = COLORS.white;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+
+
+
+
+//colonna
+function drawColumn(c) {
+	ctx.fillStyle = COLORS.elevatorColumn;
+    ctx.fillRect(c.x - 2, 0, 4, canvas.height);//centrato x
+}
+
+//piano
+function drawFloor(f) {
+	ctx.fillStyle = f.id % 3 === 0 ? COLORS.floor1
+				  : f.id % 3 === 1 ? COLORS.floor2
+				  : COLORS.floor3;
+    ctx.fillRect(0, f.y, canvas.width, 4);//non centrato ma verso il basso
+	
+	//scala
+	let posx = f.exit === 'right' ? canvas.width - 10: 20;
+	let posy = f.y;
+	
+	ctx.fillStyle = COLORS.gray;
+	ctx.fillRect(posx-10, posy, 2, -FLOOR_HEIGHT);
+	ctx.fillRect(posx, posy, 2, -FLOOR_HEIGHT);
+	for (let i=4; i < FLOOR_HEIGHT; i+=4) {
+		ctx.fillRect(posx-10, posy - i, 10, 2);
+	}
+	
+	//piano 0...n
+	posx = f.exit === 'right' ? 5 : canvas.width - 25;
+	posy = f.y - FLOOR_HEIGHT + 5;
+	cart = f.exit === 'right' ? f.id + ' >' : '< ' + f.id;
+	
+	ctx.fillStyle = COLORS.green;
+	ctx.fillRect(posx, posy, 22, 14);
+	ctx.fillStyle = COLORS.white;	
+	ctx.fillText(cart, posx + 5, posy + 10);	
+}
+
+//ascensore
+function drawElevator(e) {
+	const x = (ELEVATOR_MAX_SPEED - ELEVATOR_MIN_SPEED) / 4;
+	const yellowThreshold = ELEVATOR_MIN_SPEED + x;
+	const orangeThreshold = ELEVATOR_MIN_SPEED + x * 2;
+	const redThreshold = ELEVATOR_MIN_SPEED + x * 3;
+	ctx.fillStyle = e.speed < yellowThreshold ? COLORS.elevatorGreen
+				  : e.speed < orangeThreshold ? COLORS.elevatorYellow
+				  : e.speed < redThreshold ? COLORS.elevatorOrange  
+				  : COLORS.elevatorRed
+	ctx.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h);//centrato x+y
+	
+	//ctx.fillStyle = COLORS.debug;
+	//ctx.fillRect(e.x-1, e.y-1, 2, 2);
+	
+	ctx.fillStyle = COLORS.elevatorGuard;
+	
+	let u = e.h / 50;//se h=50 -> tutto ok, altrimenti deve scalare la guardia!
+	
+	//cappello
+	ctx.fillRect(e.x-6*u, e.y-23*u, 12*u, 3*u);//23
+	ctx.fillRect(e.x-12*u, e.y-20*u, 24*u, 2*u);//20
+	//testa
+	ctx.fillRect(e.x-6*u, e.y-18*u, 12*u, 6*u);//18
+	//corpo alto
+	ctx.fillRect(e.x-14*u, e.y-12*u, 28*u, 10*u);//12
+	//corpo basso
+	ctx.fillRect(e.x-10*u, e.y-2*u, 20*u, 10*u);//2
+	//gambe
+	ctx.fillRect(e.x-8*u, e.y+8*u, 16*u, 13*u);//8
+	//piedi
+	ctx.fillRect(e.x-12*u, e.y+21*u, 24*u, 2*u);//21
+	//fucile
+	ctx.fillRect(e.x-1*u, e.y-2*u, 20*u, 4*u);//2
+	//gomito
+	ctx.fillRect(e.x-15*u, e.y-4*u, 15*u, 8*u);//4
+}
+
+function getWalkFrame() {
+    return Math.floor(performance.now() / 150) % 2;
+}
+//player
+function drawPlayer() {
+    if (player.isExploding) {drawExplosion(); return;} // non disegnare se esplode
+
+	//ctx.strokeStyle = COLORS.debug;
+	//ctx.strokeRect(player.x-1, player.y-1, 2, 2);
+	//ctx.strokeRect(player.x-player.w/2,player.y-player.h/2,player.w,player.h);//centrato x+y
+	
+    const x = player.x;
+    const y = player.y;
+
+    const frame = player.dir !== 0 ? Math.floor(performance.now()/150) % 2 : 0;
+	
+	let u = player.h / 30;//se h=30 -> tutto ok, altrimenti deve scalare anche il player!
+	let d = player.dir === -1 ? -1 : 1;
+	
+	//cappello blu
+	ctx.fillStyle = '#00f';
+	ctx.fillRect(x-7*d *u, y-13*u, 14*u*d, 3*u);
+	ctx.fillRect(x-9*d *u, y-10*u, 22*u*d, 3*u);
+	
+	//faccia marroncina
+	ctx.fillStyle = '#a50';
+	ctx.fillRect(x-7*d*u, y-7*u, 14*u*d, 8*u);
+	//naso
+	ctx.fillRect(x+7*d*u, y-4*u, 4*u*d, 3*u);
+	//collo
+	ctx.fillRect(x-5*d*u, y+1*u, 8*u*d, 3*u);
+	
+	//giacca bavero
+	ctx.fillStyle = '#720';
+	ctx.fillRect(x-8*d*u, y-4*u, 3*u*d, 6*u);
+	ctx.fillRect(x-8*d*u, y+1*u, 6*u*d, 3*u);
+	
+	//occhiale nero
+	ctx.fillStyle = '#000';
+	ctx.fillRect(x-5*d*u, y-6*u, 12*u*d,3*u);
+	ctx.fillRect(x+3*d*u, y-4*u, 4*u*d, 3*u);
+	
+	if(frame === 0){
+		//borsone bianco
+		ctx.fillStyle = '#fff';
+		ctx.fillRect(x-11*d*u, y+4*u, 18*u*d, 9*u);
+		//quadrato nero
+		ctx.fillStyle = '#000';
+		ctx.fillRect(x-9*d*u, y+6*u, 14*u*d, 6*u);
+		
+		//braccio della giacca
+		ctx.fillStyle = '#720';
+		ctx.fillRect(x-5*d*u, y+4*u, 6*u*d, 4*u);
+		
+		//piedini
+		ctx.fillStyle = '#00f';
+		ctx.fillRect(x-7*d*u, y+13*u, 4*u*d, 3*u);
+		ctx.fillRect(x-1*d*u, y+13*u, 4*u*d, 3*u);
+	} else {
+		//borsone bianco
+		ctx.fillStyle = '#fff';
+		ctx.fillRect(x-9*d*u, y+4*u, 18*u*d, 9*u);
+		//quadrato nero
+		ctx.fillStyle = '#000';
+		ctx.fillRect(x-7*d*u, y+6*u, 14*u*d, 6*u);
+		
+		//braccio della giacca
+		ctx.fillStyle = '#720';
+		ctx.fillRect(x-3*d*u, y+4*u, 6*u*d, 4*u);
+		
+		//piedini
+		ctx.fillStyle = '#00f';
+		ctx.fillRect(x-5*d*u, y+13*u, 4*u*d, 3*u);
+		ctx.fillRect(x+1*d*u, y+13*u, 4*u*d, 3*u);
+	}
+}
+
+
+// HUD
+function drawStats() {
+    ctx.fillStyle = COLORS.white;
+    ctx.fillText('FLOOR= ' + player.floor, 0, 10);
+	ctx.fillText('PLAYER= ' + player.x +' '+player.y, 0, 20);
+	ctx.fillText('LIVES= ' + player.lives, 0, 30);
+	ctx.fillText('ISMUTE= ' + isMute, 0, 40);
+	ctx.fillText('ISPAUSED= ' + isPaused, 0, 50);
+	for(let i=0;i<elevators.length;i++) {
+		ctx.fillText('E['+elevators[i].id+']= ' + (elevators[i].x|0) +' '+(elevators[i].y|0)+' -> '+elevators[i].speed.toFixed(1), 0, 70 +(i*10));
+	}
+}
+
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>
