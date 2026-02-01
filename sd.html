@@ -148,6 +148,12 @@ document.addEventListener('keydown', e => {
 	}
 });
 
+//click
+canvas.addEventListener("pointerdown", () => {
+    if (player.dir !== 0) player.dir *= -1;
+	else player.dir = floors[player.floor].exit === 'left' ? -1 : 1;
+});
+
 //gestione scanlines on/off
 function changeScanLines() {
   scanLinesEnabled = !scanLinesEnabled;
