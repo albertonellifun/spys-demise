@@ -110,7 +110,11 @@ const elevatorsColumnWidth = (canvas.width - 2 * PLAYER_SIZE) / ELEVATORS;
 const elevators = [];
 const columns = [];
 const floors = [];
-
+const treasures = [];
+const treasuresTypes = ['💾','🔪','💣','🧨','💻','📸','🗒️','🕶️','💰️','🔦',
+						'🔑','🧪','🔒','🧤','💵','🔓','📝','📱','🪪','💼',
+						'💉','🗺️','🧭','🎧','🔍','💽','🚗','🎥','📡','🔫'];
+						
 const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  
 				 elevatorGuard : '#000', elevatorColumn : '#fff', 
 				 floor1 : '#06a', floor2 : '#a0a', floor3 : '#999', floor4 : '#0a0', greenCart : '#095',
@@ -202,12 +206,10 @@ function createStripesPattern(ctx, color, ptype) {
     const pCanvas = document.createElement('canvas');
     pCanvas.width = 4;
     pCanvas.height = 4;
-
     const pCtx = pCanvas.getContext('2d');
-
-    pCtx.strokeStyle = color;
-    pCtx.lineWidth = 1;
-    pCtx.beginPath();
+	pCtx.strokeStyle = color;
+    
+	pCtx.beginPath();
 	if (ptype === 0) {
 		pCtx.moveTo(0, 4);
 		pCtx.lineTo(4, 0);
@@ -239,7 +241,7 @@ function initGame() {
 	}
 
 	//init ascensori
-	for(let c of columns) {
+	for (let c of columns) {
 		elevators.push({
 			id: c.id,
 			x: c.x,
@@ -247,8 +249,18 @@ function initGame() {
 			w: ELEVATOR_SIZE,
 			h: ELEVATOR_SIZE,
 			dir: rnd(0,1) > 0.5 ? 1 : -1,
-			speed:2
+			speed: 2
 		});
+	}
+	
+	//init tesori
+	let seconds = new Date().getSeconds();
+	for (let i = 0; i < FLOORS; i++) {
+		let colIndex = (rnd(0, ELEVATORS - 1)) | 0;
+		let treasureX = ((columns[colIndex].x + columns[colIndex + 1].x) / 2) - 12;//rnd(PLAYER_SIZE * 2, canvas.width - PLAYER_SIZE * 2)
+		let treasureY = canvas.height - 4 - i * FLOOR_HEIGHT;
+		let treasureType = (seconds + i) % treasuresTypes.length
+		treasures.push( {id: i, taken: false, type: treasureType, x: treasureX, y: treasureY, floor: i});
 	}
 
 	//tasti
@@ -335,10 +347,21 @@ function resetGame() {
 	player.timer = Date.now();
 	player.timeLeft = 255;
 	
-	for(let e of elevators) {
+	for (let e of elevators) {
 		e.y = rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2);
 		e.dir = rnd(0,1) > 0.5 ? 1 : -1;
 		e.speed = 2;
+	}
+	
+	let seconds = new Date().getSeconds();
+	for (let t of treasures) {
+	debugger;
+		t.taken = false;
+		let colIndex = (rnd(0, ELEVATORS - 1)) | 0;
+		let treasureX = (columns[colIndex].x + columns[colIndex + 1].x) / 2 - 12;
+		let treasureType = (seconds + t.floor) % treasuresTypes.length
+		t.x = treasureX;
+		t.type = treasureType;
 	}
 	
 	playBeep();
@@ -403,7 +426,7 @@ function update() {
 			if (player.floor + 1 < FLOORS) {
 				player.isMovingFloor = true;
 				player.targetY = floors[player.floor+1].y - (player.h / 2);	
-				playElevatorSoundBonus();
+				//playElevatorSoundBonus();
 				player.timer = Date.now();
 			} else {
 				alert('YOU WIN!');
@@ -422,7 +445,7 @@ function update() {
 			if (player.floor + 1 < FLOORS) {
 				player.isMovingFloor = true;
 				player.targetY = floors[player.floor+1].y - (player.h / 2);
-				playElevatorSoundBonus();
+				//playElevatorSoundBonus();
 				player.timer = Date.now();
 			} else {
 				alert('YOU WIN!');
@@ -430,7 +453,12 @@ function update() {
 			}
 		}
 	}
-
+	
+	//tesori
+	if (Math.abs( treasures[player.floor].x - player.x) < 3) {
+		treasures[player.floor].taken = true;
+		playElevatorSoundBonus();
+	}
 
     //calcolo Y player basato sul piano
     let playerY = floors[player.floor].y - (player.h / 2);
@@ -584,6 +612,15 @@ function drawFloor(f) {
 	ctx.fillStyle = COLORS.white;
 	ctx.font = '14px monospace';
 	ctx.fillText(cart, posx + 5, posy + 11);	
+	
+	//la spia deve raccogliere gli oggetti
+	ctx.fillStyle = COLORS.white;
+	ctx.font = '20px monospace';
+	for (let t of treasures) {
+		if (t.taken === false) {
+		ctx.fillText(treasuresTypes[t.type], t.x - 2, t.y - 10);
+		}
+	}
 }
 
 //ascensore
@@ -592,6 +629,7 @@ function drawElevator(e) {
 	const yellowThreshold = ELEVATOR_MIN_SPEED + x;
 	const orangeThreshold = ELEVATOR_MIN_SPEED + x * 2;
 	const redThreshold = ELEVATOR_MIN_SPEED + x * 3;
+	//ascensore
 	ctx.fillStyle = colorMode != 0 ? COLORS.white 
 				  : e.speed < yellowThreshold ? COLORS.elevatorGreen
 				  : e.speed < orangeThreshold ? COLORS.elevatorYellow
@@ -599,10 +637,9 @@ function drawElevator(e) {
 				  : COLORS.elevatorRed
 	ctx.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h);//centrato x+y
 	
+	//guardia
 	ctx.fillStyle = COLORS.elevatorGuard;
-	
 	let u = e.h / 50;//se h=50 -> tutto ok, altrimenti deve scalare la guardia!
-	
 	//cappello
 	ctx.fillRect(e.x-6*u, e.y-23*u, 12*u, 3*u);//23
 	ctx.fillRect(e.x-12*u, e.y-20*u, 24*u, 2*u);//20
