@@ -11,13 +11,16 @@ body {
 	display: flex;
 	flex-direction: row;
 	gap: 10px;
+	justify-content: center;
+    align-items: center;
 	font-size: 36px;
 	color: #fff;
 	font-family: monospace;
+	overflow: hidden;
 }
 canvas {
     display: block;
-    margin: auto;
+    margin: 0;
     image-rendering: pixelated;
     width: 85vw;
     height: 85vh;
@@ -33,10 +36,10 @@ canvas {
 	display: flex;
 	flex-direction: column;
 	justify-content: space-between;
-	align-items: center;
+	align-items: stretch;
 }
-#stats #timer, #stats #lives {
-	margin: 0;
+#stats #timer, #stats #lives, #stats #btnContainer {
+	margin: 10px;
 }
 #stats .button {
 	width: 100%;
@@ -77,6 +80,7 @@ canvas {
 		<p class="button" id="musicBtn" onclick="changeMusic()"></p>
 		<p class="button" id="scanLinesBtn" onclick="changeScanLines()"></p>
 		<p class="button" id="colorModeBtn" onclick="changeColorMode()"></p>
+		<p class="button" id="godModeBtn" onclick="changeGodMode()"></p>
 		<p class="button" id="pauseBtn" onclick="changePause()"></p>
 		<p class="button" id="resetBtn" onclick="resetGame()"></p>
 	</div>
@@ -103,15 +107,22 @@ const ELEVATOR_MAX_SPEED = 4.5;//velocita imbruttita
 
 const elevatorsColumnWidth = (canvas.width - 2 * PLAYER_SIZE) / ELEVATORS;
 
+const elevators = [];
+const columns = [];
+const floors = [];
+
 const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  
 				 elevatorGuard : '#000', elevatorColumn : '#fff', 
 				 explosion1 : '#f00', explosion2 : '#ff0', explosion3 : '#f80',
-				 floor1 : '#333', floor2 : '#666', floor3 : '#999', greenCart : '#095',
+				 floor1 : '#06a', floor2 : '#a0a', floor3 : '#999', floor4 : '#0a0', greenCart : '#095',
+				 hat: '#00f', glasses : '#000', jacket : '#720', skin: '#a50', bagBorder: '#fff', bagInner: '#000', feet : '#00f',
 				 white : '#fff', gray : '#999', red : '#f00', green : '#0f0', black : '#000' };
 
 let isPaused = false;//una pausa ogni tanto ci vuole!
 let scanLinesEnabled = false;//a noi piacciono i monitor vintage
 let colorMode = 0;//0=colori, 1=bw, 2=verde, 3=arancio
+let godMode = false;//yeeees!
+let lastStatsUpdate = 0;//ottimizzazione update stats
 
 //audio
 let isSoundEnabled = false;
@@ -158,7 +169,6 @@ function startMusic() {
 	}
 }
 
-
 function playElevatorSoundTop() { if (!isSoundEnabled) return; const sound = elevatorSoundTop.cloneNode(); sound.play(); }
 function playElevatorSoundBottom() { if (!isSoundEnabled) return; const sound = elevatorSoundBottom.cloneNode(); sound.play(); }
 function playElevatorSoundHit() { if (!isSoundEnabled) return; const sound = elevatorSoundHit.cloneNode(); sound.play(); }
@@ -183,43 +193,85 @@ const player = {
 	timeLeft: 255
 };
 
+//utility usata ovunque
 function rnd(min, max) {
 	return Math.random()* (max - min) + min;
 }
 
+//a noi ci piace scopiazzare la grafica apple2 tutta a righette
+function createStripesPattern(ctx, color, ptype) {
+    const pCanvas = document.createElement('canvas');
+    pCanvas.width = 4;
+    pCanvas.height = 4;
 
-//===== ASCENSORI =====
-const elevators = [];
-const columns = [];
-const floors = [];
+    const pCtx = pCanvas.getContext('2d');
 
-//calcola y di ogni piano e uscita
-for (let i = 0; i < FLOORS; i++) {
-	floors.push( { id: i, exit: i % 2 === 0 ? 'right' : 'left', y: canvas.height - 4 - i*FLOOR_HEIGHT } );        
+    pCtx.strokeStyle = color;
+    pCtx.lineWidth = 1;
+    pCtx.beginPath();
+	if (ptype === 0) {
+		pCtx.moveTo(0, 4);
+		pCtx.lineTo(4, 0);
+	} else if (ptype === 1) {
+		pCtx.moveTo(0, 0);
+		pCtx.lineTo(4, 4);
+	}
+    pCtx.stroke();
+
+    return ctx.createPattern(pCanvas, 'repeat');
 }
 
-//calcola x di ogni colonna
-for (let i = 0; i < ELEVATORS; i++) {
-	columns.push( {id: i, x: PLAYER_SIZE + (elevatorsColumnWidth/2) + (elevatorsColumnWidth * i) });
+const stripesPatternA = createStripesPattern(ctx, COLORS.floor1, 0);
+const stripesPatternB = createStripesPattern(ctx, COLORS.floor2, 1);
+const stripesPatternC = createStripesPattern(ctx, COLORS.floor3, 0);
+const stripesPatternD = createStripesPattern(ctx, COLORS.floor4, 1);
+
+
+//setta TUTTO!
+function initGame() {
+	//calcola y di ogni piano e uscita
+	for (let i = 0; i < FLOORS; i++) {
+		floors.push( { id: i, exit: i % 2 === 0 ? 'right' : 'left', y: canvas.height - 4 - i*FLOOR_HEIGHT } );        
+	}
+
+	//calcola x di ogni colonna
+	for (let i = 0; i < ELEVATORS; i++) {
+		columns.push( {id: i, x: PLAYER_SIZE + (elevatorsColumnWidth/2) + (elevatorsColumnWidth * i) });
+	}
+
+	//init ascensori
+	for(let c of columns) {
+		elevators.push({
+			id: c.id,
+			x: c.x,
+			y: rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2),
+			w: ELEVATOR_SIZE,
+			h: ELEVATOR_SIZE,
+			dir: rnd(0,1) > 0.5 ? 1 : -1,
+			speed:2
+		});
+	}
+
+	//tasti
+	document.addEventListener('keydown', e => {
+		if (e.key === 'ArrowLeft') player.dir = -1;
+		if (e.key === 'ArrowRight') player.dir = 1;
+		if (e.key === 'R' || e.key === 'r') resetGame();
+		if (e.key === 'S' || e.key === 's') changeSound();
+		if (e.key === 'M' || e.key === 'm') changeMusic();
+		if (e.key === 'P' || e.key === 'p') changePause();
+		if (e.key === 'X' || e.key === 'x') changeScanLines();
+		if (e.key === 'C' || e.key === 'c') changeColorMode();
+		if (e.key === 'G' || e.key === 'g') changeGodMode();
+	});
+
+	//click
+	canvas.addEventListener("pointerdown", () => {
+		if (player.dir !== 0) player.dir *= -1;
+		else player.dir = floors[player.floor].exit === 'left' ? -1 : 1;
+	});
 }
 
-//tasti
-document.addEventListener('keydown', e => {
-	if (e.key === 'ArrowLeft') player.dir = -1;
-	if (e.key === 'ArrowRight') player.dir = 1;
-	if (e.key === 'R' || e.key === 'r') resetGame();
-	if (e.key === 'S' || e.key === 's') changeSound();
-	if (e.key === 'M' || e.key === 'm') changeMusic();
-	if (e.key === 'P' || e.key === 'p') changePause();
-	if (e.key === 'X' || e.key === 'x') changeScanLines();
-	if (e.key === 'C' || e.key === 'c') changeColorMode();
-});
-
-//click
-canvas.addEventListener("pointerdown", () => {
-    if (player.dir !== 0) player.dir *= -1;
-	else player.dir = floors[player.floor].exit === 'left' ? -1 : 1;
-});
 
 //gestione scanlines on/off
 function changeScanLines() {
@@ -228,52 +280,50 @@ function changeScanLines() {
 	else document.getElementById('scanlines-overlay').style.display = 'none';
 }
 
+//maledetti barbatrucchi
+function changeGodMode() {
+	godMode = !godMode;
+}
+
 //gestione colori fasulli
 function changeColorMode() {
 	colorMode = (colorMode + 1) % 4;
 	if (colorMode === 0) {
-		ctx.filter = 'none';
+		document.getElementById('game').style.filter = '';
 		document.body.style.color = '#fff';
 	}
 	else if (colorMode === 1) {
-		ctx.filter = 'grayscale(1)';
+		document.getElementById('game').style.filter = 'grayscale(1)';
 		document.body.style.color = '#fff';
 	}
 	else if (colorMode === 2) {
-		ctx.filter = 'sepia(1) hue-rotate(60deg) saturate(10)';
+		document.getElementById('game').style.filter = 'sepia(1) hue-rotate(60deg) saturate(5)';
 		document.body.style.color = '#0f0';
 	}
 	else {
-		ctx.filter = 'sepia(1) saturate(10)';
+		document.getElementById('game').style.filter = 'sepia(1) saturate(5)';
 		document.body.style.color = '#fa0';
 	}
 }
 
+//gestione musica background
 function changeMusic() {
 	isMusicEnabled = !isMusicEnabled;
 	if (isMusicEnabled) startMusic(); else stopMusic();
 }
 
+//gestione suoni ascensori/esplosione
 function changeSound() {
 	isSoundEnabled = !isSoundEnabled;
 }
 
+//gestione pausa
 function changePause() {
 	isPaused = !isPaused;
 }
-//init ascensori
-for(let c of columns) {
-	elevators.push({
-		id: c.id,
-		x: c.x,
-		y: rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2),
-		w: ELEVATOR_SIZE,
-		h: ELEVATOR_SIZE,
-		dir: rnd(0,1) > 0.5 ? 1 : -1,
-		speed:2
-	});
-}
 
+
+//resetta TUTTO o quasi
 function resetGame() {
 	player.x = player.w / 2;
 	player.y = 0;
@@ -411,15 +461,14 @@ function update() {
 			playElevatorSoundBottom();
         }
 
-        if (checkCollision(player, e) && !player.isExploding) {
+        if (checkCollision(player, e) && !player.isExploding && !godMode) {
 			killPlayer();
-        }
-		
+        }		
     }
 }
 
 
-//diminuisci vite + musichetta terribile + respawn dopo 2/3 secondi
+//gestione player morto: diminuisce vite + musichetta terribile + respawn dopo 2/3 secondi
 function killPlayer() {
 	playElevatorSoundHit();
 		
@@ -438,10 +487,12 @@ function killPlayer() {
 	else player.x = player.x = player.w / 2;//sx
 }
 
+//gestione gameover
 function gameOver() {
 	alert('GAME OVER!');
 	resetGame();
 }
+
 
 //===== DRAW =====
 function draw() {
@@ -468,21 +519,25 @@ function draw() {
     }
 
     drawPlayer();
-	drawStats();
+	
+	if(player.timeLeft !== lastStatsUpdate || isPaused) {
+		drawStats();
+		lastStatsUpdate = player.timeLeft;
+	}
 }
 
 //kaboom
 function drawExplosion() {
     for (let j = 1; j <= 3; j++) {
 		ctx.beginPath();
-		const noise = PLAYER_SIZE * 0.25;
+		const noise = PLAYER_SIZE * 0.2;
 		for (let i = 0; i <= 20; i++) {
 			const angle = (i / 20) * Math.PI * 2;
-			const offset = Math.sin(i * 1.7) * noise;
-			const r = PLAYER_SIZE * 1.5 + offset - (j * 8);
+			const offset = Math.sin(i * 1.5) * noise;
+			const r = PLAYER_SIZE * 1.5 + offset - (j * 10);
 			const x = player.explosionX + Math.cos(angle) * r;
-			const y = player.explosionY + Math.sin(angle) * r;
-
+			const y = Math.min( player.explosionY + Math.sin(angle) * r, player.y + player.h/2 + 3);//esplosione solo verso l'alto
+			
 			if (i === 0) ctx.moveTo(x, y);
 			else ctx.lineTo(x, y);
 		}
@@ -496,7 +551,6 @@ function drawExplosion() {
     ctx.stroke();
 }
 
-
 //colonna
 function drawColumn(c) {
 	ctx.fillStyle = COLORS.black;
@@ -507,9 +561,8 @@ function drawColumn(c) {
 
 //piano
 function drawFloor(f) {
-	ctx.fillStyle = f.id % 3 === 0 ? COLORS.floor1
-				  : f.id % 3 === 1 ? COLORS.floor2
-				  : COLORS.floor3;
+	//ctx.fillStyle = f.id % 3 === 0 ? COLORS.floor1 : f.id % 3 === 1 ? COLORS.floor2 : COLORS.floor3;
+	ctx.fillStyle = f.id % 4 === 0 ? stripesPatternA : f.id % 4 === 1 ? stripesPatternB : f.id % 4 === 2 ? stripesPatternC : stripesPatternD;
     ctx.fillRect(0, f.y, canvas.width, 5);//non centrato ma verso il basso
 	
 	//scala
@@ -574,9 +627,11 @@ function drawElevator(e) {
 	ctx.fillRect(e.x-15*u, e.y-4*u, 15*u, 8*u);//4
 }
 
+//utility per animare zampette
 function getWalkFrame() {
     return Math.floor(performance.now() / 150) % 2;
 }
+
 //player
 function drawPlayer() {
     if (player.isExploding) {drawExplosion(); return;} //non disegnare se esplode
@@ -594,63 +649,69 @@ function drawPlayer() {
 	let d = player.dir === -1 ? -1 : 1;
 	
 	//cappello blu
-	ctx.fillStyle = '#00f';
-	ctx.fillRect(x-7*d *u, y-13*u, 14*u*d, 3*u);
-	ctx.fillRect(x-9*d *u, y-10*u, 22*u*d, 3*u);
+	ctx.fillStyle = COLORS.hat;
+	ctx.fillRect(x-7*d *u, y-13*u, 14*u*d, 3*u);//   -7...7
+	ctx.fillRect(x-10*d *u, y-10*u, 21*u*d, 3*u);//-10.....11
 	
 	//faccia marroncina
-	ctx.fillStyle = '#a50';
-	ctx.fillRect(x-7*d*u, y-7*u, 14*u*d, 8*u);
+	ctx.fillStyle = COLORS.skin;
+	ctx.fillRect(x-4*d*u, y-7*u, 11*u*d, 9*u);//  -4...7
 	//naso
-	ctx.fillRect(x+7*d*u, y-4*u, 4*u*d, 3*u);
-	//collo
-	ctx.fillRect(x-5*d*u, y+1*u, 8*u*d, 3*u);
+	ctx.fillRect(x+7*d*u, y-4*u, 4*u*d, 3*u);//      7..11
 	
 	//giacca bavero
-	ctx.fillStyle = '#720';
-	ctx.fillRect(x-8*d*u, y-4*u, 3*u*d, 6*u);
-	ctx.fillRect(x-8*d*u, y+1*u, 6*u*d, 3*u);
+	ctx.fillStyle = COLORS.jacket;
+	ctx.fillRect(x-7*d*u, y-7*u, 3*u*d, 6*u);//-7..-4
+	ctx.fillRect(x-7*d*u, y-1*u, 6*u*d, 3*u);//-7.....6
+	ctx.fillRect(x-7*d*u, y+2*u, 14*u*d, 3*u);//-7...7
 	
 	//occhiale nero
-	ctx.fillStyle = '#000';
+	ctx.fillStyle = COLORS.glasses;
 	ctx.fillRect(x-5*d*u, y-6*u, 12*u*d,3*u);
 	ctx.fillRect(x+3*d*u, y-4*u, 4*u*d, 3*u);
 	
 	if (frame === 0) {
 		//borsone bianco
-		ctx.fillStyle = '#fff';
-		ctx.fillRect(x-11*d*u, y+4*u, 18*u*d, 9*u);
+		ctx.fillStyle = COLORS.bagBorder;
+		ctx.fillRect(x-10*d*u, y+4*u, 18*u*d, 9*u);
 		//quadrato nero
-		ctx.fillStyle = '#000';
-		ctx.fillRect(x-9*d*u, y+6*u, 14*u*d, 6*u);
+		ctx.fillStyle = COLORS.bagInner;
+		ctx.fillRect(x-8*d*u, y+6*u, 14*u*d, 6*u);
 		
 		//braccio della giacca
-		ctx.fillStyle = '#720';
+		ctx.fillStyle = COLORS.jacket;
 		ctx.fillRect(x-5*d*u, y+4*u, 6*u*d, 4*u);
 		
+		//mano
+		ctx.fillStyle = COLORS.skin;
+		ctx.fillRect(x-5*d*u, y+8*u, 6*u*d, 2*u);
+		
 		//piedini
-		ctx.fillStyle = '#00f';
+		ctx.fillStyle = COLORS.feet;
 		ctx.fillRect(x-7*d*u, y+13*u, 4*u*d, 3*u);
 		ctx.fillRect(x-1*d*u, y+13*u, 4*u*d, 3*u);
 	} else {
 		//borsone bianco
-		ctx.fillStyle = '#fff';
-		ctx.fillRect(x-9*d*u, y+4*u, 18*u*d, 9*u);
+		ctx.fillStyle = COLORS.bagBorder;
+		ctx.fillRect(x-8*d*u, y+4*u, 18*u*d, 9*u);
 		//quadrato nero
-		ctx.fillStyle = '#000';
-		ctx.fillRect(x-7*d*u, y+6*u, 14*u*d, 6*u);
+		ctx.fillStyle = COLORS.bagInner;
+		ctx.fillRect(x-6*d*u, y+6*u, 14*u*d, 6*u);
 		
 		//braccio della giacca
-		ctx.fillStyle = '#720';
+		ctx.fillStyle = COLORS.jacket;
 		ctx.fillRect(x-3*d*u, y+4*u, 6*u*d, 4*u);
 		
+		//mano
+		ctx.fillStyle = COLORS.skin;
+		ctx.fillRect(x-3*d*u, y+8*u, 6*u*d, 2*u);
+		
 		//piedini
-		ctx.fillStyle = '#00f';
+		ctx.fillStyle = COLORS.feet;
 		ctx.fillRect(x-5*d*u, y+13*u, 4*u*d, 3*u);
 		ctx.fillRect(x+1*d*u, y+13*u, 4*u*d, 3*u);
 	}
 }
-
 
 //HUD
 function drawStats() {
@@ -664,16 +725,19 @@ function drawStats() {
 	document.getElementById('musicBtn').innerText = isMusicEnabled ? '[M]USIC' : '[m]usic';
 	document.getElementById('scanLinesBtn').innerText = scanLinesEnabled ? '[X]CANLINES' : '[x]canlines';
 	document.getElementById('colorModeBtn').innerText = '[C]OLOR ' + colorMode;
+	document.getElementById('godModeBtn').innerText = godMode ? '[G]ODMODE' : '[g]odmode';
 	document.getElementById('pauseBtn').innerText = isPaused ? '[P]AUSE' : '[p]ause';
 	document.getElementById('resetBtn').innerText = '[r]eset';
 }
 
+//===== LOOP DEL GIOCO! //=====
 function loop() {
     update();
     draw();
     requestAnimationFrame(loop);
 }
 
+initGame();
 loop();
 
 </script>
