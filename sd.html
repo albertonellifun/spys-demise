@@ -113,7 +113,6 @@ const floors = [];
 
 const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  
 				 elevatorGuard : '#000', elevatorColumn : '#fff', 
-				 explosion1 : '#f00', explosion2 : '#ff0', explosion3 : '#f80',
 				 floor1 : '#06a', floor2 : '#a0a', floor3 : '#999', floor4 : '#0a0', greenCart : '#095',
 				 hat: '#00f', glasses : '#000', jacket : '#720', skin: '#a50', bagBorder: '#fff', bagInner: '#000', feet : '#00f',
 				 white : '#fff', gray : '#999', red : '#f00', green : '#0f0', black : '#000' };
@@ -301,7 +300,7 @@ function changeColorMode() {
 		document.body.style.color = '#0f0';
 	}
 	else {
-		document.getElementById('game').style.filter = 'sepia(1) saturate(5)';
+		document.getElementById('game').style.filter = 'sepia(1) hue-rotate(-30deg) saturate(5)';
 		document.body.style.color = '#fa0';
 	}
 }
@@ -526,29 +525,29 @@ function draw() {
 	}
 }
 
-//kaboom
+//kaboom rimpiazzato dalla nuvoletta di artillery
 function drawExplosion() {
-    for (let j = 1; j <= 3; j++) {
-		ctx.beginPath();
-		const noise = PLAYER_SIZE * 0.2;
-		for (let i = 0; i <= 20; i++) {
-			const angle = (i / 20) * Math.PI * 2;
-			const offset = Math.sin(i * 1.5) * noise;
-			const r = PLAYER_SIZE * 1.5 + offset - (j * 10);
-			const x = player.explosionX + Math.cos(angle) * r;
-			const y = Math.min( player.explosionY + Math.sin(angle) * r, player.y + player.h/2 + 3);//esplosione solo verso l'alto
-			
-			if (i === 0) ctx.moveTo(x, y);
-			else ctx.lineTo(x, y);
-		}
-		ctx.closePath();
-		ctx.fillStyle = j === 1 ? COLORS.explosion1 : j === 2 ? COLORS.explosion2 : COLORS.explosion3;
-		ctx.fill();
-	}
-
-    ctx.strokeStyle = COLORS.white;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+	let scale = player.h / 20;
+	const x = player.explosionX - player.w;
+	const y = player.explosionY - player.h / 2;
+	
+	ctx.beginPath();
+	ctx.moveTo(x, y);
+	ctx.bezierCurveTo(x + 5 * scale, y - 15 * scale, x + 18 * scale, y - 25 * scale, 
+					  x + 22 * scale, y - 10 * scale);
+    ctx.bezierCurveTo(x + 28 * scale, y - 30 * scale, x + 42 * scale, y - 20 * scale, 
+					  x + 40 * scale, y);
+    ctx.bezierCurveTo(x + 45 * scale, y - 5 * scale, x + 50 * scale, y + 15 * scale, 
+					  x + 42 * scale, y + 15 * scale);
+    ctx.bezierCurveTo(x + 35 * scale, y + 25 * scale, x + 20 * scale, y + 20 * scale, 
+					  x + 10 * scale, y + 15 * scale);
+    ctx.bezierCurveTo(x + 5 * scale, y + 20 * scale, x - 5 * scale, y + 10 * scale, 
+					  x, y);
+	ctx.closePath();
+	ctx.fillStyle = COLORS.white;
+	ctx.strokeStyle = COLORS.gray;
+	ctx.fill();
+	ctx.stroke();
 }
 
 //colonna
@@ -561,7 +560,6 @@ function drawColumn(c) {
 
 //piano
 function drawFloor(f) {
-	//ctx.fillStyle = f.id % 3 === 0 ? COLORS.floor1 : f.id % 3 === 1 ? COLORS.floor2 : COLORS.floor3;
 	ctx.fillStyle = f.id % 4 === 0 ? stripesPatternA : f.id % 4 === 1 ? stripesPatternB : f.id % 4 === 2 ? stripesPatternC : stripesPatternD;
     ctx.fillRect(0, f.y, canvas.width, 5);//non centrato ma verso il basso
 	
@@ -594,15 +592,12 @@ function drawElevator(e) {
 	const yellowThreshold = ELEVATOR_MIN_SPEED + x;
 	const orangeThreshold = ELEVATOR_MIN_SPEED + x * 2;
 	const redThreshold = ELEVATOR_MIN_SPEED + x * 3;
-	ctx.fillStyle = colorMode === 1 ? COLORS.white 
+	ctx.fillStyle = colorMode != 0 ? COLORS.white 
 				  : e.speed < yellowThreshold ? COLORS.elevatorGreen
 				  : e.speed < orangeThreshold ? COLORS.elevatorYellow
 				  : e.speed < redThreshold ? COLORS.elevatorOrange  
 				  : COLORS.elevatorRed
 	ctx.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h);//centrato x+y
-	
-	//ctx.fillStyle = COLORS.debug;
-	//ctx.fillRect(e.x-1, e.y-1, 2, 2);
 	
 	ctx.fillStyle = COLORS.elevatorGuard;
 	
