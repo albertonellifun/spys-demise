@@ -355,7 +355,6 @@ function resetGame() {
 	
 	let seconds = new Date().getSeconds();
 	for (let t of treasures) {
-	debugger;
 		t.taken = false;
 		let colIndex = (rnd(0, ELEVATORS - 1)) | 0;
 		let treasureX = (columns[colIndex].x + columns[colIndex + 1].x) / 2 - 12;
@@ -455,8 +454,9 @@ function update() {
 	}
 	
 	//tesori
-	if (Math.abs( treasures[player.floor].x - player.x) < 3) {
-		treasures[player.floor].taken = true;
+	let currentTreasure = treasures[player.floor];
+	if (currentTreasure.taken === false && Math.abs( currentTreasure.x - player.x) < 5) {
+		currentTreasure.taken = true;
 		playElevatorSoundBonus();
 	}
 
