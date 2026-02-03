@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, height=device-height, maximum-scale=1.0, user-scalable=no">
 <link rel="shortcut icon" type="image/x-icon" href="favicon.ico"/>
 <title>Spy's Demise - Apple ][ clone</title>
 <style>
@@ -38,9 +38,22 @@ canvas {
 	justify-content: space-between;
 	align-items: stretch;
 }
-#stats #timer, #stats #lives, #stats #btnContainer {
-	margin: 10px;
+#stats #timer, 
+#stats #lives, 
+#stats #btnContainer {
+	margin: 0 10px;
 }
+#stats #score,
+#stats #high,
+#stats #scoreLabel,
+#stats #highLabel {
+	margin: 0;
+	font-size: 16px;
+}
+#stats #highLabel {
+	margin-top: 10px;
+}
+
 #stats .button {
 	width: 100%;
 	padding: 10px 0;
@@ -75,6 +88,10 @@ canvas {
 <div id="stats">
 	<p id="timer"></p>
 	<p id="lives"></p>
+	<p id="scoreLabel">SCORE</p>
+	<p id="score"></p>
+	<p id="highLabel">HIGH</p>
+	<p id="high"></p>
 	<div id="btnContainer">
 		<p class="button" id="soundBtn" onclick="changeSound()"></p>
 		<p class="button" id="musicBtn" onclick="changeMusic()"></p>
@@ -111,9 +128,9 @@ const elevators = [];
 const columns = [];
 const floors = [];
 const treasures = [];
-const treasuresTypes = ['💾','🔪','💣','🧨','💻','📸','🗒️','🕶️','💰️','🔦',
-						'🔑','🧪','🔒','🧤','💵','🔓','📝','📱','🪪','💼',
-						'💉','🗺️','🧭','🎧','🔍','💽','🚗','🎥','📡','🔫'];
+const treasuresTypes = ['💾','🔪','💣','🧨','💻','📸','🗒️','🕶️','💰️','🔦','💶','💍','🔧','🚬','💳',
+						'🔑','🧪','🔒','🧤','💵','📝','📱','🪪','💼','💎','🗝','🗡','💀','🏦','🔓',
+						'💉','🗺️','🧭','🪙','🎧','🔍','💽','🚗','🪓','🎥','📡','⏰','📜','👑','🔫'];
 						
 const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  
 				 elevatorGuard : '#000', elevatorColumn : '#fff', 
@@ -193,7 +210,9 @@ const player = {
 	floorSpeed: 2,//velocita di salita
 	lives: 5,//vite
 	timer: Date.now(),//player ha 25 secondi di tempo per attraversare il floor (timer: 255...0)
-	timeLeft: 255
+	timeLeft: 255,
+	score: 0,
+	maxScore: 0
 };
 
 //utility usata ovunque
@@ -281,6 +300,9 @@ function initGame() {
 		if (player.dir !== 0) player.dir *= -1;
 		else player.dir = floors[player.floor].exit === 'left' ? -1 : 1;
 	});
+	
+	//no scroll touch
+	document.body.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 }
 
 
@@ -346,6 +368,7 @@ function resetGame() {
 	player.lives = 5;
 	player.timer = Date.now();
 	player.timeLeft = 255;
+	player.score = 0;//non azzero maxScore
 	
 	for (let e of elevators) {
 		e.y = rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2);
@@ -419,6 +442,7 @@ function update() {
 	if (player.x < (player.w / 2)) {
 		player.x = player.w / 2; //resta a sx
 		player.dir = 0;
+		player.score += (player.floor + 1) * 100 + player.timeLeft;
 
 		if (exitSide === 'left') {
 			//player.floor++;
@@ -438,6 +462,7 @@ function update() {
 	if (player.x  > (canvas.width - player.w / 2)) {
 		player.x = canvas.width - player.w / 2; //resta a dx
 		player.dir = 0;
+		player.score += (player.floor + 1) * 100 + player.timeLeft;
 		
 		if (exitSide === 'right') {
 			//player.floor++;
@@ -457,6 +482,7 @@ function update() {
 	let currentTreasure = treasures[player.floor];
 	if (currentTreasure.taken === false && Math.abs( currentTreasure.x - player.x) < 5) {
 		currentTreasure.taken = true;
+		player.score += (currentTreasure.floor + 1) * 10;
 		playElevatorSoundBonus();
 	}
 
@@ -516,6 +542,7 @@ function killPlayer() {
 
 //gestione gameover
 function gameOver() {
+	if (player.score > player.maxScore) player.maxScore = player.score;
 	alert('GAME OVER!');
 	resetGame();
 }
@@ -667,10 +694,6 @@ function getWalkFrame() {
 //player
 function drawPlayer() {
     if (player.isExploding) {drawExplosion(); return;} //non disegnare se esplode
-
-	//ctx.strokeStyle = COLORS.debug;
-	//ctx.strokeRect(player.x-1, player.y-1, 2, 2);
-	//ctx.strokeRect(player.x-player.w/2,player.y-player.h/2,player.w,player.h);//centrato x+y
 	
     const x = player.x;
     const y = player.y;
@@ -747,11 +770,13 @@ function drawPlayer() {
 
 //HUD
 function drawStats() {
-	document.getElementById('timer').innerHTML = player.timeLeft;
+	document.getElementById('timer').innerHTML = (player.timeLeft+'').padStart(3, '0');
 	
 	let txt = '';//&#1F3C3;==omino, &#x2B1C;==quadratone, &#x25A0;==quadratino
 	for(let i=0;i<player.lives;i++) { txt += '&#x25A0; ' }
 	document.getElementById('lives').innerHTML = txt;
+	document.getElementById('score').innerHTML = player.score;
+	document.getElementById('high').innerHTML = player.maxScore;
 	
 	document.getElementById('soundBtn').innerText = isSoundEnabled ? '[S]OUND' : '[s]ound';
 	document.getElementById('musicBtn').innerText = isMusicEnabled ? '[M]USIC' : '[m]usic';
