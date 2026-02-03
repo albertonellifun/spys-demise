@@ -14,6 +14,7 @@ body {
 	justify-content: center;
     align-items: center;
 	font-size: 36px;
+	font-size: 5vh;
 	color: #fff;
 	font-family: monospace;
 	overflow: hidden;
@@ -42,6 +43,9 @@ canvas {
 #stats #lives, 
 #stats #btnContainer {
 	margin: 0 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
 }
 #stats #score,
 #stats #high,
@@ -49,21 +53,20 @@ canvas {
 #stats #highLabel {
 	margin: 0;
 	font-size: 16px;
+	font-size: 4vh;
 }
 #stats #highLabel {
 	margin-top: 10px;
 }
-
 #stats .button {
 	width: 100%;
 	padding: 10px 0;
 	font-family: monospace;
 	font-size: 12px;
+	font-size: 2vh;
 	white-space: nowrap;
 	border: 2px solid;
-}
-#stats, canvas {
-	border: 2px solid;
+	margin: 0;
 }
 #scanlines-overlay {
     position: absolute;
@@ -75,7 +78,7 @@ canvas {
     background: repeating-linear-gradient(to right, transparent, transparent 0px, rgba(0, 0, 0, 0.33) 2px, transparent 4px);
     background-size: 100% 4px;
     opacity: 1;
-    display:none;
+    display:block;
     z-index: 10;
 }
 </style>
@@ -102,10 +105,6 @@ canvas {
 		<p class="button" id="resetBtn" onclick="resetGame()"></p>
 	</div>
 </div>
-
-<audio id="bgMusic" loop preload="auto">
-	<source src="./res/brahms.mp3" type="audio/mpeg">
-</audio>
   
 <script>
 const canvas = document.getElementById('game');
@@ -124,13 +123,34 @@ const ELEVATOR_MAX_SPEED = 4.5;//velocita imbruttita
 
 const elevatorsColumnWidth = (canvas.width - 2 * PLAYER_SIZE) / ELEVATORS;
 
+const player = {
+    x: PLAYER_SIZE / 2,
+	y: 0,//calcolato a caldo
+    floor: 0,//piano di riferimento
+    w: PLAYER_SIZE,
+    h: PLAYER_SIZE,
+	dir: 0,//fermo
+	isMovingFloor: false,//no cambio piano
+	isExploding: false,//no kaboom
+	explosionX: 0,//coordinate kaboom
+	explosionY: 0,//coordinate kaboom
+	targetY: 0,//stesso piano target
+	floorSpeed: 2,//velocita di salita
+	lives: 5,//vite
+	timer: Date.now(),//player ha 25 secondi di tempo per attraversare il floor (timer: 255...0)
+	timeLeft: 255,//visualizzato
+	score: 0,//visualizzato
+	maxScore: 0,//visualizzato
+	spawnSide: 'left'//player nasce a sinistra
+};
+
 const elevators = [];
 const columns = [];
 const floors = [];
 const treasures = [];
-const treasuresTypes = ['💾','🔪','💣','🧨','💻','📸','🗒️','🕶️','💰️','🔦','💶','💍','🔧','🚬','💳',
-						'🔑','🧪','🔒','🧤','💵','📝','📱','🪪','💼','💎','🗝','🗡','💀','🏦','🔓',
-						'💉','🗺️','🧭','🪙','🎧','🔍','💽','🚗','🪓','🎥','📡','⏰','📜','👑','🔫'];
+const treasuresTypes = ['💾','🔪','💣','🧨','💻','📸','🗒️','🕶️','💰️','🔦','💶','💍','🔧','🚬','💳','🪃',
+						'🔑','🧪','🔒','🧤','💵','📝','📱','🪪','💼','💎','🗝','🗡','💀','🏦','🔓','🏹',
+						'💉','🗺️','🧭','🪙','🎧','🔍','💽','🚗','🪓','🎥','📡','⏰','📜','👑','👤','🔫'];
 						
 const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange : '#f80', elevatorRed : '#f00',  
 				 elevatorGuard : '#000', elevatorColumn : '#fff', 
@@ -138,19 +158,29 @@ const COLORS = { elevatorGreen : '#0f0', elevatorYellow : '#ff0', elevatorOrange
 				 hat: '#00f', glasses : '#000', jacket : '#720', skin: '#a50', bagBorder: '#fff', bagInner: '#000', feet : '#00f',
 				 white : '#fff', gray : '#999', red : '#f00', green : '#0f0', black : '#000' };
 
-let isPaused = false;//una pausa ogni tanto ci vuole!
-let scanLinesEnabled = false;//a noi piacciono i monitor vintage
 let colorMode = 0;//0=colori, 1=bw, 2=verde, 3=arancio
+const colorModes = [ 
+	{ filter:'', color:'#fff' },//default a colori
+	{ filter:'grayscale(1)', color:'#fff' },//bw
+	{ filter:'sepia(1) hue-rotate(60deg) saturate(5)', color:'#0f0' },//verde
+	{ filter:'sepia(1) hue-rotate(-30deg) saturate(5)', color:'#fa0' }//arancione
+];
+
+let isPaused = false;//una pausa ogni tanto ci vuole!
+let scanLinesEnabled = true;//a noi piacciono i monitor vintage
 let godMode = false;//yeeees!
 let lastStatsUpdate = 0;//ottimizzazione update stats
 
+const floorPatterns = [];//colori pavimenti come pattern
+
 //audio
-let isSoundEnabled = false;
+let isSoundEnabled = true;
 let isMusicEnabled = false;
 const elevatorSoundTop = new Audio('./res/elevator-top.wav');
 const elevatorSoundBottom = new Audio('./res/elevator-bottom.wav');
 const elevatorSoundHit = new Audio('./res/elevator-hit.wav');
 const elevatorSoundBonus = new Audio('./res/elevator-bonus.wav');
+const bgMusic = new Audio('./res/brahms.mp3'); bgMusic.loop = true; bgMusic.preload = 'auto';
 
 //apple 2 beep scopiazzato da artillery che suona da dio!
 function playBeep() {
@@ -170,54 +200,34 @@ function playBeep() {
   oscillator.stop(audioCtx.currentTime + 0.1); //durata 250 ms
 }
 
+//gestione stop musica
 function stopMusic() {
-	const music = document.getElementById("bgMusic");
-	if (music) {
-		music.pause();
+	if (bgMusic) {
+		bgMusic.pause();
 	}
 }
 	
+//gestione start musica
 function startMusic() {
 	if (!isMusicEnabled) return;
-	const music = document.getElementById("bgMusic");
-	if (music) {
-	  music.volume = 0.5;
-	  music.currentTime = 0;
-	  music.play().catch((e) => {
-		console.warn("🔇 bgMusic bloccata:", e);
+	if (bgMusic) {
+		bgMusic.volume = 0.5;
+		bgMusic.currentTime = 0;
+		bgMusic.play().catch((e) => {
+			console.warn("🔇 bgMusic bloccata:", e); 
 		});
 	}
 }
 
+//gestione suoni ascensori/bonus
 function playElevatorSoundTop() { if (!isSoundEnabled) return; const sound = elevatorSoundTop.cloneNode(); sound.play(); }
 function playElevatorSoundBottom() { if (!isSoundEnabled) return; const sound = elevatorSoundBottom.cloneNode(); sound.play(); }
 function playElevatorSoundHit() { if (!isSoundEnabled) return; const sound = elevatorSoundHit.cloneNode(); sound.play(); }
 function playElevatorSoundBonus() { if (!isSoundEnabled) return; const sound = elevatorSoundBonus.cloneNode(); sound.play(); }
 
-//===== PLAYER =====
-const player = {
-    x: PLAYER_SIZE / 2,
-	y: 0,//calcolato a caldo
-    floor: 0,
-    w: PLAYER_SIZE,
-    h: PLAYER_SIZE,
-	dir: 0,//fermo
-	isMovingFloor: false,//no cambio piano
-	isExploding: false,//no kaboom
-	explosionX:0,
-	explosionY:0,
-	targetY: 0,//stesso target
-	floorSpeed: 2,//velocita di salita
-	lives: 5,//vite
-	timer: Date.now(),//player ha 25 secondi di tempo per attraversare il floor (timer: 255...0)
-	timeLeft: 255,
-	score: 0,
-	maxScore: 0
-};
-
 //utility usata ovunque
 function rnd(min, max) {
-	return Math.random()* (max - min) + min;
+	return Math.random() * (max - min) + min;
 }
 
 //a noi ci piace scopiazzare la grafica apple2 tutta a righette
@@ -227,13 +237,13 @@ function createStripesPattern(ctx, color, ptype) {
     pCanvas.height = 4;
     const pCtx = pCanvas.getContext('2d');
 	pCtx.strokeStyle = color;
-    
+	
 	pCtx.beginPath();
 	if (ptype === 0) {
-		pCtx.moveTo(0, 4);
+		pCtx.moveTo(0, 4);// diagonali \\\\\\
 		pCtx.lineTo(4, 0);
 	} else if (ptype === 1) {
-		pCtx.moveTo(0, 0);
+		pCtx.moveTo(0, 0);// diagonale //////
 		pCtx.lineTo(4, 4);
 	}
     pCtx.stroke();
@@ -241,20 +251,21 @@ function createStripesPattern(ctx, color, ptype) {
     return ctx.createPattern(pCanvas, 'repeat');
 }
 
-const stripesPatternA = createStripesPattern(ctx, COLORS.floor1, 0);
-const stripesPatternB = createStripesPattern(ctx, COLORS.floor2, 1);
-const stripesPatternC = createStripesPattern(ctx, COLORS.floor3, 0);
-const stripesPatternD = createStripesPattern(ctx, COLORS.floor4, 1);
+
+
+
+
 
 
 //setta TUTTO!
 function initGame() {
 	//calcola y di ogni piano e uscita
 	for (let i = 0; i < FLOORS; i++) {
-		floors.push( { id: i, exit: i % 2 === 0 ? 'right' : 'left', y: canvas.height - 4 - i*FLOOR_HEIGHT } );        
+		let exit = player.spawnSide === 'left' ? (i % 2 === 0 ? 'right' : 'left') : (i % 2 === 0 ? 'left' : 'right');
+		floors.push( { id: i, exitSide: exit, y: canvas.height - 4 - i*FLOOR_HEIGHT } );        
 	}
 
-	//calcola x di ogni colonna
+	//calcola x di ogni colonna (sx e dx spazio per il player)
 	for (let i = 0; i < ELEVATORS; i++) {
 		columns.push( {id: i, x: PLAYER_SIZE + (elevatorsColumnWidth/2) + (elevatorsColumnWidth * i) });
 	}
@@ -272,14 +283,20 @@ function initGame() {
 		});
 	}
 	
+	//pavimenti
+	floorPatterns.push( createStripesPattern(ctx, COLORS.floor1, 0) );
+	floorPatterns.push( createStripesPattern(ctx, COLORS.floor2, 1) );
+	floorPatterns.push( createStripesPattern(ctx, COLORS.floor3, 0) );
+	floorPatterns.push( createStripesPattern(ctx, COLORS.floor4, 1) );
+	
 	//init tesori
 	let seconds = new Date().getSeconds();
 	for (let i = 0; i < FLOORS; i++) {
 		let colIndex = (rnd(0, ELEVATORS - 1)) | 0;
-		let treasureX = ((columns[colIndex].x + columns[colIndex + 1].x) / 2) - 12;//rnd(PLAYER_SIZE * 2, canvas.width - PLAYER_SIZE * 2)
+		let treasureX = ((columns[colIndex].x + columns[colIndex + 1].x) / 2) - 12;
 		let treasureY = canvas.height - 4 - i * FLOOR_HEIGHT;
 		let treasureType = (seconds + i) % treasuresTypes.length
-		treasures.push( {id: i, taken: false, type: treasureType, x: treasureX, y: treasureY, floor: i});
+		treasures.push( {id: i, taken: false, type: treasureType, x: treasureX, y: treasureY, floor: i, colIndex: colIndex});
 	}
 
 	//tasti
@@ -298,7 +315,7 @@ function initGame() {
 	//click
 	canvas.addEventListener("pointerdown", () => {
 		if (player.dir !== 0) player.dir *= -1;
-		else player.dir = floors[player.floor].exit === 'left' ? -1 : 1;
+		else player.dir = floors[player.floor].exitSide === 'left' ? -1 : 1;
 	});
 	
 	//no scroll touch
@@ -311,53 +328,48 @@ function changeScanLines() {
 	scanLinesEnabled = !scanLinesEnabled;
 	if (scanLinesEnabled) document.getElementById('scanlines-overlay').style.display = 'block';
 	else document.getElementById('scanlines-overlay').style.display = 'none';
+	drawStats();
 }
 
 //maledetti barbatrucchi
 function changeGodMode() {
 	godMode = !godMode;
+	drawStats();
 }
 
 //gestione colori fasulli
 function changeColorMode() {
 	colorMode = (colorMode + 1) % 4;
-	if (colorMode === 0) {
-		document.getElementById('game').style.filter = '';
-		document.body.style.color = '#fff';
-	}
-	else if (colorMode === 1) {
-		document.getElementById('game').style.filter = 'grayscale(1)';
-		document.body.style.color = '#fff';
-	}
-	else if (colorMode === 2) {
-		document.getElementById('game').style.filter = 'sepia(1) hue-rotate(60deg) saturate(5)';
-		document.body.style.color = '#0f0';
-	}
-	else {
-		document.getElementById('game').style.filter = 'sepia(1) hue-rotate(-30deg) saturate(5)';
-		document.body.style.color = '#fa0';
-	}
+	
+	document.getElementById('game').style.filter = colorModes[colorMode].filter;
+	document.body.style.color = colorModes[colorMode].color;
+	
+	drawStats();
 }
 
 //gestione musica background
 function changeMusic() {
 	isMusicEnabled = !isMusicEnabled;
 	if (isMusicEnabled) startMusic(); else stopMusic();
+	drawStats();
 }
 
 //gestione suoni ascensori/esplosione
 function changeSound() {
 	isSoundEnabled = !isSoundEnabled;
+	drawStats();
 }
 
 //gestione pausa
 function changePause() {
 	isPaused = !isPaused;
+	drawStats();
 }
 
 
 //resetta TUTTO o quasi
 function resetGame() {
+	//player
 	player.x = player.w / 2;
 	player.y = 0;
     player.floor = 0;
@@ -368,14 +380,30 @@ function resetGame() {
 	player.lives = 5;
 	player.timer = Date.now();
 	player.timeLeft = 255;
-	player.score = 0;//non azzero maxScore
 	
+	//punti
+	if (player.score > player.maxScore) player.maxScore = player.score;
+	player.score = 0;//non azzero maxScore	
+	
+	//spawn
+	player.spawnSide = rnd(0,1) < 0.5 ? 'left' : 'right';
+	if (player.spawnSide === 'left') player.x = player.w / 2;
+	else player.x = canvas.width - player.w / 2;
+	
+	//piani
+	for (let f of floors) {
+		let exit = player.spawnSide === 'left' ? (f.id % 2 === 0 ? 'right' : 'left') : (f.id % 2 === 0 ? 'left' : 'right');
+		f.exitSide = exit;
+	}
+	
+	//guardie
 	for (let e of elevators) {
 		e.y = rnd(ELEVATOR_SIZE*2, canvas.height - ELEVATOR_SIZE*2);
 		e.dir = rnd(0,1) > 0.5 ? 1 : -1;
 		e.speed = 2;
 	}
 	
+	//tesori
 	let seconds = new Date().getSeconds();
 	for (let t of treasures) {
 		t.taken = false;
@@ -386,7 +414,9 @@ function resetGame() {
 		t.type = treasureType;
 	}
 	
+	//beep!!!
 	playBeep();
+	drawStats();
 }
 
 //===== COLLISION =====
@@ -413,8 +443,6 @@ function update() {
 		}
 	}
 	
-	const exitSide = floors[player.floor].exit;
-	
 	if (player.isMovingFloor) {
 		//muove il player verso targetY
 		if (player.y > player.targetY) {
@@ -438,44 +466,18 @@ function update() {
 	}
 	
 
-    //uscita lato sinistro
-	if (player.x < (player.w / 2)) {
+	//uscita lato sinistro
+	if (player.x < (player.w / 2) && !player.isMovingFloor) {
 		player.x = player.w / 2; //resta a sx
 		player.dir = 0;
-		player.score += (player.floor + 1) * 100 + player.timeLeft;
-
-		if (exitSide === 'left') {
-			//player.floor++;
-			if (player.floor + 1 < FLOORS) {
-				player.isMovingFloor = true;
-				player.targetY = floors[player.floor+1].y - (player.h / 2);	
-				//playElevatorSoundBonus();
-				player.timer = Date.now();
-			} else {
-				alert('YOU WIN!');
-				resetGame();
-			}
-		}
+		if (floors[player.floor].exitSide === 'left') exitPlayer();
 	}
 
 	//uscita lato destro
-	if (player.x  > (canvas.width - player.w / 2)) {
+	if (player.x  > (canvas.width - player.w / 2) && !player.isMovingFloor) {
 		player.x = canvas.width - player.w / 2; //resta a dx
 		player.dir = 0;
-		player.score += (player.floor + 1) * 100 + player.timeLeft;
-		
-		if (exitSide === 'right') {
-			//player.floor++;
-			if (player.floor + 1 < FLOORS) {
-				player.isMovingFloor = true;
-				player.targetY = floors[player.floor+1].y - (player.h / 2);
-				//playElevatorSoundBonus();
-				player.timer = Date.now();
-			} else {
-				alert('YOU WIN!');
-				resetGame();
-			}
-		}
+		if (floors[player.floor].exitSide === 'right') exitPlayer();
 	}
 	
 	//tesori
@@ -484,6 +486,7 @@ function update() {
 		currentTreasure.taken = true;
 		player.score += (currentTreasure.floor + 1) * 10;
 		playElevatorSoundBonus();
+		drawStats();
 	}
 
     //calcolo Y player basato sul piano
@@ -503,46 +506,65 @@ function update() {
 	
         e.y += e.dir * e.speed;
 
+		//rimbalzo alto
         if (e.y - e.h/2 <= 0) {
 			e.dir *= -1;
 			e.y = e.h/2;
 			playElevatorSoundTop();
 		}
+		
+		//rimbalzo basso
 		if (e.y + e.h/2 >= canvas.height) {
             e.dir *= -1;
 			e.y = canvas.height - e.h/2;
 			playElevatorSoundBottom();
         }
-
-        if (checkCollision(player, e) && !player.isExploding && !godMode) {
+		
+		//collisione con la spia
+        if (!player.isMovingFloor && !player.isExploding && !godMode && checkCollision(player, e)) {
 			killPlayer();
         }		
     }
 }
 
+//gestione player che esce dal piano e sale le scale
+function exitPlayer() {
+	player.score += (player.floor + 1) * 100 + player.timeLeft;
+	drawStats();
+			
+	if (player.floor + 1 < FLOORS) {
+		player.isMovingFloor = true;
+		player.targetY = floors[player.floor+1].y - (player.h / 2);	
+		player.timer = Date.now();
+	} else {
+		alert('YOU WIN!');
+		resetGame();
+	}
+}
 
 //gestione player morto: diminuisce vite + musichetta terribile + respawn dopo 2/3 secondi
 function killPlayer() {
 	playElevatorSoundHit();
-		
 	player.lives--;
 	player.dir = 0;
 	player.isExploding = true;
 	player.explosionX = player.x;
 	player.explosionY = player.y;
+	drawStats();
+	
 	setTimeout(function() { 
 		player.isExploding = false; 
 		player.timer = Date.now();
 		if (player.lives === 0) gameOver();
 	}, 3000);
 	
-	if (floors[player.floor].exit === 'left') player.x = canvas.width - player.w / 2;//dx
+	//respawn
+	if (floors[player.floor].exitSide === 'left') player.x = canvas.width - player.w / 2;//dx
 	else player.x = player.x = player.w / 2;//sx
 }
 
 //gestione gameover
 function gameOver() {
-	if (player.score > player.maxScore) player.maxScore = player.score;
 	alert('GAME OVER!');
 	resetGame();
 }
@@ -553,29 +575,25 @@ function draw() {
 	//tutto noir
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 	
-	//bordo
-	ctx.strokeStyle = COLORS.gray;
-	ctx.strokeRect(0, 0, canvas.width, canvas.height);
-	
-    //piani
-    for(let f of floors) {
-		drawFloor(f);
-    }
-	
+	//piani
+    for(let f of floors) drawFloor(f);
+   
+	//bordi laterali palazzo
+	let BORDER_SIZE = 3;
+	ctx.fillStyle = COLORS.gray;
+	ctx.fillRect(0, 0, BORDER_SIZE, canvas.height);
+	ctx.fillRect(canvas.width - BORDER_SIZE, 0, BORDER_SIZE, canvas.height);
+   
 	//colonne/funi ascensori
-	for(let c of columns) {
-		drawColumn(c);
-	}
-
+	for(let c of columns) drawColumn(c);
+	
     //ascensori
-    for(let e of elevators) {
-		drawElevator(e);
-    }
+    for(let e of elevators) drawElevator(e);
 
     drawPlayer();
 	
-	if(player.timeLeft !== lastStatsUpdate || isPaused) {
-		drawStats();
+	if(player.timeLeft !== lastStatsUpdate) {
+		drawStats(true);
 		lastStatsUpdate = player.timeLeft;
 	}
 }
@@ -615,11 +633,18 @@ function drawColumn(c) {
 
 //piano
 function drawFloor(f) {
-	ctx.fillStyle = f.id % 4 === 0 ? stripesPatternA : f.id % 4 === 1 ? stripesPatternB : f.id % 4 === 2 ? stripesPatternC : stripesPatternD;
+	//pavimento
+	ctx.fillStyle = floorPatterns[f.id % 4];
     ctx.fillRect(0, f.y, canvas.width, 5);//non centrato ma verso il basso
+
+	//soffitto ultimo piano
+	if (f.id === FLOORS - 1) {
+		ctx.fillStyle = floorPatterns[(f.id+1) % 4];
+		ctx.fillRect(0, f.y-FLOOR_HEIGHT, canvas.width, 8);
+	}
 	
 	//scala
-	let posx = f.exit === 'right' ? canvas.width - 10: 20;
+	let posx = f.exitSide === 'right' ? canvas.width - 10: 20;
 	let posy = f.y;
 	
 	ctx.fillStyle = COLORS.gray;
@@ -630,9 +655,9 @@ function drawFloor(f) {
 	}
 	
 	//piano 0...n
-	posx = f.exit === 'right' ? 5 : canvas.width - 25;
+	posx = f.exitSide === 'right' ? 5 : canvas.width - 25;
 	posy = f.y - FLOOR_HEIGHT + 5;
-	cart = f.exit === 'right' ? f.id + '>' : '<' + f.id;
+	cart = f.exitSide === 'right' ? f.id + '>' : '<' + f.id;
 	
 	ctx.fillStyle = COLORS.greenCart;
 	ctx.fillRect(posx, posy, 22, 14);
@@ -645,7 +670,7 @@ function drawFloor(f) {
 	ctx.font = '20px monospace';
 	for (let t of treasures) {
 		if (t.taken === false) {
-		ctx.fillText(treasuresTypes[t.type], t.x - 2, t.y - 10);
+			ctx.fillText(treasuresTypes[t.type], t.x - 2, t.y - 10);
 		}
 	}
 }
@@ -698,7 +723,7 @@ function drawPlayer() {
     const x = player.x;
     const y = player.y;
 
-    const frame = player.dir !== 0 ? Math.floor(performance.now()/150) % 2 : 0;
+    const frame = player.dir === 0 ? 0 : getWalkFrame() * 2;
 	
 	let u = player.h / 30;//se h=30 -> tutto ok, altrimenti deve scalare anche il player!
 	let d = player.dir === -1 ? -1 : 1;
@@ -725,58 +750,40 @@ function drawPlayer() {
 	ctx.fillRect(x-5*d*u, y-6*u, 12*u*d,3*u);
 	ctx.fillRect(x+3*d*u, y-4*u, 4*u*d, 3*u);
 	
-	if (frame === 0) {
-		//borsone bianco
-		ctx.fillStyle = COLORS.bagBorder;
-		ctx.fillRect(x-10*d*u, y+4*u, 18*u*d, 9*u);
-		//quadrato nero
-		ctx.fillStyle = COLORS.bagInner;
-		ctx.fillRect(x-8*d*u, y+6*u, 14*u*d, 6*u);
+	//da qui in poi, il frame sposta di 2px in avanti gli oggetti
+	//borsone bianco
+	ctx.fillStyle = COLORS.bagBorder;
+	ctx.fillRect(x-(10 + frame)*d*u, y+4*u, 18*u*d, 9*u);
+	//quadrato nero
+	ctx.fillStyle = COLORS.bagInner;
+	ctx.fillRect(x-(8 + frame)*d*u, y+6*u, 14*u*d, 6*u);
 		
-		//braccio della giacca
-		ctx.fillStyle = COLORS.jacket;
-		ctx.fillRect(x-5*d*u, y+4*u, 6*u*d, 4*u);
+	//braccio della giacca
+	ctx.fillStyle = COLORS.jacket;
+	ctx.fillRect(x-(5 + frame)*d*u, y+4*u, 6*u*d, 4*u);
 		
-		//mano
-		ctx.fillStyle = COLORS.skin;
-		ctx.fillRect(x-5*d*u, y+8*u, 6*u*d, 2*u);
-		
-		//piedini
-		ctx.fillStyle = COLORS.feet;
-		ctx.fillRect(x-7*d*u, y+13*u, 4*u*d, 3*u);
-		ctx.fillRect(x-1*d*u, y+13*u, 4*u*d, 3*u);
-	} else {
-		//borsone bianco
-		ctx.fillStyle = COLORS.bagBorder;
-		ctx.fillRect(x-8*d*u, y+4*u, 18*u*d, 9*u);
-		//quadrato nero
-		ctx.fillStyle = COLORS.bagInner;
-		ctx.fillRect(x-6*d*u, y+6*u, 14*u*d, 6*u);
-		
-		//braccio della giacca
-		ctx.fillStyle = COLORS.jacket;
-		ctx.fillRect(x-3*d*u, y+4*u, 6*u*d, 4*u);
-		
-		//mano
-		ctx.fillStyle = COLORS.skin;
-		ctx.fillRect(x-3*d*u, y+8*u, 6*u*d, 2*u);
-		
-		//piedini
-		ctx.fillStyle = COLORS.feet;
-		ctx.fillRect(x-5*d*u, y+13*u, 4*u*d, 3*u);
-		ctx.fillRect(x+1*d*u, y+13*u, 4*u*d, 3*u);
-	}
+	//mano
+	ctx.fillStyle = COLORS.skin;
+	ctx.fillRect(x-(5 + frame)*d*u, y+8*u, 6*u*d, 2*u);
+	
+	//piedini
+	ctx.fillStyle = COLORS.feet;
+	ctx.fillRect(x-(7 + frame)*d*u, y+13*u, 4*u*d, 3*u);
+	ctx.fillRect(x-(1 + frame)*d*u, y+13*u, 4*u*d, 3*u);
 }
 
 //HUD
-function drawStats() {
-	document.getElementById('timer').innerHTML = (player.timeLeft+'').padStart(3, '0');
+function drawStats(timerOnly) {
+	if (timerOnly) {
+		document.getElementById('timer').innerHTML = (player.timeLeft+'').padStart(3, '0');
+		return;
+	}
+	document.getElementById('score').innerHTML = (player.score+'').padStart(6, '0');
+	document.getElementById('high').innerHTML = (player.maxScore+'').padStart(6, '0');
 	
-	let txt = '';//&#1F3C3;==omino, &#x2B1C;==quadratone, &#x25A0;==quadratino
+	let txt = '';//&#1F3C3;==omino, &#x25A0;==quadratino
 	for(let i=0;i<player.lives;i++) { txt += '&#x25A0; ' }
 	document.getElementById('lives').innerHTML = txt;
-	document.getElementById('score').innerHTML = player.score;
-	document.getElementById('high').innerHTML = player.maxScore;
 	
 	document.getElementById('soundBtn').innerText = isSoundEnabled ? '[S]OUND' : '[s]ound';
 	document.getElementById('musicBtn').innerText = isMusicEnabled ? '[M]USIC' : '[m]usic';
@@ -795,6 +802,7 @@ function loop() {
 }
 
 initGame();
+drawStats();
 loop();
 
 </script>
